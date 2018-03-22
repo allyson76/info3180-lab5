@@ -5,11 +5,13 @@ Werkzeug Documentation:  http://werkzeug.pocoo.org/documentation/
 This file creates your application.
 """
 
-from app import app, db, login_manager
-from flask import render_template, request, redirect, url_for, flash
-from flask_login import login_user, logout_user, current_user, login_required
+from app import app, db
+from flask import render_template, request, redirect, url_for, flash, jsonify
 from forms import LoginForm
 from models import UserProfile
+from werkzeug.security import check_password_hash
+from werkzeug.utils import secure_filename
+import os, datetime
 
 
 ###
@@ -27,56 +29,74 @@ def about():
     """Render the website's about page."""
     return render_template('about.html')
     
-@app.route('/secure-page')
-@login_required
-def secure_page():
-    """Render a secure page on our website that only logged in users can access."""
-    return render_template('secure_page.html')
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
+@app.route('/profile', methods=['POST','GET'])
+def profile():
     form = LoginForm()
-    if request.method == "POST" and form.validate_on_submit():
-        # change this to actually validate the entire form submission
-        # and not just one field
-        if form.username.data:
-            # Get the username and password values from the form.
-            username= form.username.data
-            password= form.password.data
+    print form.validate_on_submit()
+    print form.errors
+    print request.form
+    if request.method=='POST' and form.validate_on_submit():
+        count = db.session.query(UserProfile).count()
+        location=form.location.data
+        bio=form.biography.data
+        lname=form.lastname.data
+        fname=form.firstname.data
+        mail=form.email.data
+        gender=form.gender.data
+        photograph = form.photo.data
+        date = datetime.date.today()
+        uid = 10000 + count
+        filename = str(uid)+".jpg"
+        photograph.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        user = UserProfile(id= uid,first_name=fname, last_name = lname,gender=gender,location=location,bio= bio,email=mail,created_on=date)
+        db.session.add(user)
+        db.session.commit()
+        flash('Profile created!', 'success')
+        return redirect(url_for('profiles'))
+    else:
+        return render_template('profile.html', form = form)
+        
 
-            # using your model, query database for a user based on the username
-            # and password submitted
-            # store the result of that query to a `user` variable so it can be
-            # passed to the login_user() method.
-            user= UserProfile.query.filter_by(username=username, password=password).first()
-            
-            
+@app.route('/profiles', methods=['POST','GET'])
+def profiles():
+    users = db.session.query(UserProfile).all()
+    if request.method == 'GET':
+        return  render_template('profiles.html', users = users)
+    elif request.method == "POST" and request.headers['Content-Type'] == "application/json":
+        users_list = []
+        for user in users:
+            users_list += [{"username": user.first_name+user.get_id, "userid":user.get_id}]
+        user_json = {"users":users_list}
+        return jsonify(user_json)
+    else:
+        flash("Unable to get request")
+        return redirect(url_for('home'))
+        
 
-            # get user id, load into session
-            login_user(user)
-
-            # remember to flash a message to the user
-            flash('You have logged in Sucessfully!', 'success')
-            return redirect(url_for("secure_page"))  # they should be redirected to a secure-page route instead
-                
-    return render_template("login.html", form=form)
+@app.route('/userprofile/<userid>')
+def user(userid):
+    user = UserProfile.query.filter_by(id = userid ).first()
+    if request.method=='GET':
+        return render_template('userprofile.html', user =user )
+    elif request.method == "POST" and request.headers['Content-Type'] == "application/json":
+        user_json = {}
+        user_json["userid"] = user.id
+        user_json["username"] = user.first_name + user.last_name
+        user_json["image"] = user.id + '.jpg'
+        user_json["gender"] = user.gender
+        user_json["age"] = user.age
+        user_json["profile_created_on"] = user.date
+        return jsonify(user_json)
+    return render_template('userprofile.html')
     
+
+
     
-@app.route("/logout")
-@login_required  
-def logout():
-    # Logout the user and end the session
-    logout_user()
-    flash('You have been logged out.', 'danger')
-    return redirect(url_for('home'))
+
 
 
 # user_loader callback. This callback is used to reload the user object from
 # the user ID stored in the session
-@login_manager.user_loader
-def load_user(id):
-    return UserProfile.query.get(int(id))
 
 ###
 # The functions below should be applicable to all Flask apps.
